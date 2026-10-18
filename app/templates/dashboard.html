@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-8">
+  <div class="max-w-xl mx-auto bg-white p-6 rounded shadow">
+    <h1 class="text-xl font-bold">Dashboard</h1>
+    <p class="mt-2">Logged in as <strong>{{ user.email }}</strong></p>
+    <button onclick="logout()" class="mt-4 bg-gray-800 text-white px-4 py-2 rounded">Log out</button>
+  </div>
+  <script>
+    async function logout() {
+      await fetch("/auth/logout", { method: "POST" });
+      window.location = "/login";
+    }
+  </script>
+</body>
+</html>
