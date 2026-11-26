@@ -1,12 +1,19 @@
 import logging
 import json
+import uuid
 from pathlib import Path
 import subprocess
+from urllib.parse import urlsplit
+
 from fastapi import Depends, Request, FastAPI
-from fastapi import HTTPException
+from fastapi import Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from app.models import User
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db import get_async_session
+from app.models import Source, User
 from app.schemas import UserCreate, UserRead
 from app.users import auth_backend, fastapi_users, optional_user
 import asyncio
@@ -24,6 +31,28 @@ SCHOLARSHIP_URL = (
 
 app.include_router(fastapi_users.get_auth_router(auth_backend), prefix="/auth", tags=["auth"])
 app.include_router(fastapi_users.get_register_router(UserRead, UserCreate), prefix="/auth", tags=["auth"])
+
+
+def validate_source_url(url: str) -> str:
+    try:
+        parsed = urlsplit(url.strip())
+        port = parsed.port
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Enter a valid source URL.") from error
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "erasmus-plus.ec.europa.eu"
+        or parsed.username
+        or parsed.password
+        or port not in (None, 443)
+        or len(url) > 2000
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Use an HTTPS Erasmus Mundus page on erasmus-plus.ec.europa.eu.",
+        )
+    return url.strip()
+
 
 @app.get("/health")
 async def health():
@@ -79,6 +108,70 @@ async def login_page(request: Request):
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
     return templates.TemplateResponse(request, "register.html")
+
+
+@app.get("/sources", response_class=HTMLResponse)
+async def sources_page(
+    request: Request,
+    user: User | None = Depends(optional_user),
+    session: AsyncSession = Depends(get_async_session),
+):
+    if user is None:
+        return RedirectResponse("/login")
+    sources = (
+        await session.scalars(
+            select(Source).where(Source.user_id == user.id).order_by(Source.created_at.desc())
+        )
+    ).all()
+    return templates.TemplateResponse(
+        request, "sources.html", {"user": user, "sources": sources}
+    )
+
+
+@app.post("/sources")
+async def add_source(
+    name: str = Form(...),
+    url: str = Form(...),
+    keywords: str = Form(""),
+    user: User | None = Depends(optional_user),
+    session: AsyncSession = Depends(get_async_session),
+):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    name = name.strip()
+    keywords = keywords.strip()
+    if not name or len(name) > 200:
+        raise HTTPException(status_code=400, detail="Source name must be 1-200 characters.")
+    if len(keywords) > 1000:
+        raise HTTPException(status_code=400, detail="Keywords must be 1000 characters or fewer.")
+
+    source = Source(
+        user_id=user.id,
+        name=name,
+        url=validate_source_url(url),
+        keywords=keywords,
+    )
+    session.add(source)
+    await session.commit()
+    return RedirectResponse("/sources", status_code=303)
+
+
+@app.post("/sources/{source_id}/delete")
+async def delete_source(
+    source_id: uuid.UUID,
+    user: User | None = Depends(optional_user),
+    session: AsyncSession = Depends(get_async_session),
+):
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    source = await session.scalar(
+        select(Source).where(Source.id == source_id, Source.user_id == user.id)
+    )
+    if source is not None:
+        await session.delete(source)
+        await session.commit()
+    return RedirectResponse("/sources", status_code=303)
+
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, user: User | None = Depends(optional_user)):
