@@ -18,18 +18,50 @@
     async function register() {
       const email = document.getElementById("email").value;
       const password = document.getElementById("password").value;
-      const r = await fetch("/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!r.ok) {
-        document.getElementById("msg").textContent = "Could not register (email already used or invalid)";
-        return;
+      const message = document.getElementById("msg");
+      message.textContent = "";
+
+      try {
+        const response = await fetch("/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+
+        if (!response.ok) {
+          let error = null;
+          try {
+            error = await response.json();
+          } catch {
+            message.textContent = `The server returned an error (${response.status}). Check the server terminal for details.`;
+            return;
+          }
+
+          if (error.detail === "REGISTER_USER_ALREADY_EXISTS") {
+            message.textContent = "An account with this email already exists. Log in instead.";
+          } else if (Array.isArray(error.detail)) {
+            message.textContent = error.detail
+              .map((item) => item.msg)
+              .filter(Boolean)
+              .join(". ");
+          } else if (typeof error.detail === "string") {
+            message.textContent = error.detail;
+          } else {
+            message.textContent = `Registration failed (${response.status}).`;
+          }
+          return;
+        }
+
+        const body = new URLSearchParams({ username: email, password });
+        const loginResponse = await fetch("/auth/login", { method: "POST", body });
+        if (!loginResponse.ok) {
+          message.textContent = "Account created, but automatic login failed. Please log in.";
+          return;
+        }
+        window.location = "/dashboard";
+      } catch {
+        message.textContent = "Could not contact the server. Check that it is running at this address, then try again.";
       }
-      const body = new URLSearchParams({ username: email, password });
-      await fetch("/auth/login", { method: "POST", body });
-      window.location = "/dashboard";
     }
   </script>
 </body>

@@ -21,10 +21,12 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 async def get_user_manager(user_db=Depends(get_user_db)):
     yield UserManager(user_db)
 
+cookie_secure = os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes", "on"}
+
 cookie_transport = CookieTransport(
-    cookie_name="tracker_auth", 
+    cookie_name="tracker_auth",
     cookie_max_age=3600*24*7,
-    cookie_secure=False,
+    cookie_secure=cookie_secure,
 )
 
 def get_jwt_strategy() -> JWTStrategy:
